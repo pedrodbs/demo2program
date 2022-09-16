@@ -5,8 +5,8 @@ def check_and_apply(queue, rule):
     l = len(r)
     if len(queue) >= l:
         t = queue[-l:]
-        if list(zip(*t)[0]) == r:
-            new_t = rule[1](list(zip(*t)[1]))
+        if list(zip(*t))[0] == r:
+            new_t = rule[1](list(zip(*t))[1])
             del queue[-l:]
             queue.extend(new_t)
             return True
