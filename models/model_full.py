@@ -12,7 +12,6 @@ from tensorflow.python.layers import core as layer_core
 from models.util import log
 from models.ops import fc, conv2d
 
-
 SequenceLossOutput = namedtuple(
     'SequenceLossOutput',
     'mask loss output token_acc seq_acc syntax_acc ' +
@@ -293,6 +292,7 @@ class Model(object):
                 def embedding_lookup(t):
                     embedding = tf.nn.embedding_lookup(embedding_map, t)
                     return embedding
+
                 return embedding_lookup
 
         # program token feature [bs, u] -> program token [bs, dim_program_token]
@@ -313,6 +313,7 @@ class Model(object):
                     _ = fc(t, embedding_dim, is_train,
                            info=not reuse, activation_fn=None, name='fc2')
                     return _
+
                 return embedding_lookup
 
         # Input {{{
@@ -323,11 +324,11 @@ class Model(object):
         self.gt_actions_onehot = [single_a_h
                                   for single_a_h
                                   in tf.unstack(tf.transpose(
-                                      self.a_h, [0, 1, 3, 2]), axis=1)]
+                self.a_h, [0, 1, 3, 2]), axis=1)]
         # k list of [bs, max_demo_len - 1] tensor
         self.gt_actions_tokens = [single_a_h_token
                                   for single_a_h_token in tf.unstack(
-                                      self.a_h_tokens, axis=1)]
+                self.a_h_tokens, axis=1)]
         self.gt_per = tf.transpose(self.per, [1, 0, 3, 2])
 
         def rn_pool(feat, scope='rn_pool', reuse=False):
@@ -356,7 +357,7 @@ class Model(object):
                     summary = tf.reduce_mean(features, axis=1)
                 elif aggregation == 'rn':  # [bs, v]
                     summary = tf.reduce_mean(features, axis=1) + \
-                        rn_pool(features, reuse=reuse)
+                              rn_pool(features, reuse=reuse)
                 else:
                     raise ValueError('Unknown demo aggregation type')
             return summary
@@ -424,7 +425,7 @@ class Model(object):
             elif unroll_type == 'greedy':
                 # during evaluation, we perform greedy unrolling.
                 start_token = tf.zeros([self.batch_size], dtype=tf.int32) + \
-                    token_dim
+                              token_dim
                 if sequence_type == 'program':
                     end_token = self.vocab.token2int['m)']
                 elif sequence_type == 'action':
@@ -445,8 +446,9 @@ class Model(object):
             with tf.variable_scope(scope, reuse=reuse) as scope:
                 # augmented embedding with token_dim + 1 (<s>) token
                 if sequence_type == 'program' or sequence_type == 'action':
+                    # removed +1 as per https://github.com/shaohua0116/demo2program/issues/1#issuecomment-413426342
                     s_token = tf.zeros([self.batch_size, 1],
-                                       dtype=gt_tokens.dtype) + token_dim + 1
+                                       dtype=gt_tokens.dtype) + token_dim  # + 1
                     gt_tokens = tf.concat([s_token, gt_tokens[:, :-1]], axis=1)
 
                     embedding_lookup = Token_Embedding(token_dim, embedding_dim,
@@ -508,7 +510,7 @@ class Model(object):
             embedding_dim=embedding_dim, scope='Program_Decoder', reuse=False
         )
         assert self.pred_program.get_shape() == \
-            self.ground_truth_program.get_shape()
+               self.ground_truth_program.get_shape()
 
         self.greedy_pred_program, self.greedy_pred_program_len = LSTM_Decoder(
             demo_h_summary, demo_c_summary, self.program_tokens,
@@ -520,7 +522,7 @@ class Model(object):
             embedding_dim=embedding_dim, scope='Program_Decoder', reuse=True
         )
         assert self.greedy_pred_program.get_shape() == \
-            self.ground_truth_program.get_shape()
+               self.ground_truth_program.get_shape()
 
         self.action_lstm_cell = rnn.BasicLSTMCell(
             num_units=self.num_lstm_cell_units)
@@ -540,7 +542,7 @@ class Model(object):
                 embedding_dim=embedding_dim, scope='Action_Decoder',
                 reuse=i > 0)
             assert pred_action.get_shape() == \
-                self.gt_actions_onehot[i].get_shape()
+                   self.gt_actions_onehot[i].get_shape()
             self.pred_action_list.append(pred_action)
 
             greedy_pred_action, greedy_pred_action_len = LSTM_Decoder(
@@ -553,7 +555,7 @@ class Model(object):
                 embedding_dim=embedding_dim, scope='Action_Decoder',
                 reuse=True)
             assert greedy_pred_action.get_shape() == \
-                self.gt_actions_onehot[i].get_shape()
+                   self.gt_actions_onehot[i].get_shape()
             self.greedy_pred_action_list.append(greedy_pred_action)
             self.greedy_pred_action_len_list.append(greedy_pred_action_len)
         self.pred_action = tf.transpose(
@@ -597,6 +599,7 @@ class Model(object):
             tf.stack(self.pred_per_list, axis=0), [1, 0, 3, 2])
         self.greedy_pred_per = tf.transpose(
             tf.stack(self.greedy_pred_per_list, axis=0), [1, 0, 3, 2])
+
         # }}}
 
         def check_correct_syntax(p_token, p_len, is_same_seq):
@@ -611,8 +614,10 @@ class Model(object):
                 else:
                     p_str = self.vocab.intseq2str(p_token[i, :p_len[i, 0]])
                     parse_out = parse(p_str)
-                    if parse_out[1]: is_correct.append(1)
-                    else: is_correct.append(0)
+                    if parse_out[1]:
+                        is_correct.append(1)
+                    else:
+                        is_correct.append(0)
             return np.array(is_correct).astype(np.float32)
 
         # Build losses {{{
@@ -637,10 +642,10 @@ class Model(object):
                                             max_sequence_len, dtype=tf.float32,
                                             name='min_mask')
                 labels = tf.reshape(tf.transpose(gt_sequence, [0, 2, 1]),
-                                    [self.batch_size*max_sequence_len,
+                                    [self.batch_size * max_sequence_len,
                                      token_dim])
                 logits = tf.reshape(tf.transpose(pred_sequence, [0, 2, 1]),
-                                    [self.batch_size*max_sequence_len,
+                                    [self.batch_size * max_sequence_len,
                                      token_dim])
 
                 # [bs, max_program_len]
@@ -654,7 +659,7 @@ class Model(object):
 
                 # normalize loss
                 loss = tf.reduce_sum(cross_entropy * tf.reshape(gt_mask, [-1])) / \
-                    tf.reduce_sum(gt_mask)
+                       tf.reduce_sum(gt_mask)
                 output = [gt_sequence, pred_sequence]
 
                 if sequence_type == 'program' or sequence_type == 'action':
@@ -679,7 +684,7 @@ class Model(object):
                     len_equal = tf.equal(gt_sequence_lengths[:, 0],
                                          pred_sequence_lengths[:, 0])
                     is_same_seq = tf.to_float(tf.logical_and(
-                                tf.reduce_all(seq_equal, axis=-1), len_equal))
+                        tf.reduce_all(seq_equal, axis=-1), len_equal))
                     seq_accuracy = tf.reduce_sum(is_same_seq) / self.batch_size
                 else:
                     token_accuracy = None
@@ -784,7 +789,7 @@ class Model(object):
                 batch_pred_demos.append(np.stack(pred_demos, axis=0))
                 batch_pred_demo_len.append(np.stack(pred_demo_len, axis=0))
             return np.stack(batch_pred_demos, axis=0).astype(np.float32), \
-                np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
+                   np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
 
         def generate_program_output_vizdoom(init_pos, init_pos_len,
                                             vizdoom_pos_keys,
@@ -843,7 +848,7 @@ class Model(object):
                 batch_pred_demo_len.append(np.stack(pred_demo_len, axis=0))
             world.end_game()
             return np.stack(batch_pred_demos, axis=0).astype(np.float32), \
-                np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
+                   np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
 
         def ExecuteProgram(s_h, max_demo_len, k, h, w, depth,
                            p_token, p_len,
@@ -944,7 +949,7 @@ class Model(object):
             program_stat.is_correct_syntax, program_stat.is_same_seq,
             init_pos=self.init_pos, init_pos_len=self.init_pos_len)
         self.program_num_execution_correct, self.program_is_correct_execution, \
-            program_execution_acc_hist = \
+        program_execution_acc_hist = \
             CompareDemoAndExecution(self.s_h, self.demo_len, self.k,
                                     program_execution, program_execution_len,
                                     program_stat.is_same_seq)
@@ -956,8 +961,8 @@ class Model(object):
             program_stat.is_correct_syntax, program_stat.is_same_seq,
             init_pos=self.test_init_pos, init_pos_len=self.test_init_pos_len)
         self.test_program_num_execution_correct, \
-            self.test_program_is_correct_execution, \
-            test_program_execution_acc_hist = \
+        self.test_program_is_correct_execution, \
+        test_program_execution_acc_hist = \
             CompareDemoAndExecution(self.test_s_h, self.test_demo_len,
                                     self.test_k,
                                     test_program_execution,
@@ -990,7 +995,7 @@ class Model(object):
             greedy_program_stat.is_same_seq,
             init_pos=self.init_pos, init_pos_len=self.init_pos_len)
         self.greedy_num_execution_correct, self.greedy_is_correct_execution, \
-            greedy_execution_acc_hist = \
+        greedy_execution_acc_hist = \
             CompareDemoAndExecution(self.s_h, self.demo_len, self.k,
                                     greedy_execution, greedy_execution_len,
                                     greedy_program_stat.is_same_seq)
@@ -1003,8 +1008,8 @@ class Model(object):
             greedy_program_stat.is_same_seq,
             init_pos=self.test_init_pos, init_pos_len=self.test_init_pos_len)
         self.test_greedy_num_execution_correct, \
-            self.test_greedy_is_correct_execution, \
-            test_greedy_execution_acc_hist = \
+        self.test_greedy_is_correct_execution, \
+        test_greedy_execution_acc_hist = \
             CompareDemoAndExecution(self.test_s_h, self.test_demo_len,
                                     self.test_k,
                                     test_greedy_execution,
@@ -1131,6 +1136,7 @@ class Model(object):
         self.report_accuracy['greedy_avg_action_seq_acc'] = \
             greedy_avg_action_seq_acc
         self.report_output = []
+
         #
 
         # Tensorboard Summary {{{
