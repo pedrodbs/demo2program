@@ -162,3 +162,5 @@ cython_debug/
 datasets
 train_dir
 eval_dir
+karel_env/dsl/_parsetab.py
+karel_env/dsl/parser.out

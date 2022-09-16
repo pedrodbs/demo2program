@@ -5,14 +5,21 @@ from __future__ import print_function
 import h5py
 import os
 import argparse
-import progressbar
-
+import multiprocessing as mp
 import numpy as np
+import threading
+import tqdm
 
-from dsl import get_KarelDSL
-from util import log
+from typing import Dict, Any, Set
 
-import karel
+from karel_env import karel
+from karel_env.dsl import get_KarelDSL
+from karel_env.util import log
+
+from utils.mp import run_parallel
+
+PARALLEL = os.cpu_count()
+BATCH_SIZE = 100
 
 
 class KarelStateGenerator(object):
@@ -25,12 +32,12 @@ class KarelStateGenerator(object):
         # Wall
         s[:, :, 4] = self.rng.rand(h, w) > 1 - wall_prob
         s[0, :, 4] = True
-        s[h-1, :, 4] = True
+        s[h - 1, :, 4] = True
         s[:, 0, 4] = True
-        s[:, w-1, 4] = True
+        s[:, w - 1, 4] = True
         # Karel initial location
         valid_loc = False
-        while(not valid_loc):
+        while (not valid_loc):
             y = self.rng.randint(0, h)
             x = self.rng.randint(0, w)
             if not s[y, x, 4]:
@@ -39,47 +46,89 @@ class KarelStateGenerator(object):
         # Marker: num of max marker == 1 for now
         s[:, :, 6] = (self.rng.rand(h, w) > 0.9) * (s[:, :, 4] == False) > 0
         s[:, :, 5] = 1 - (np.sum(s[:, :, 6:], axis=-1) > 0) > 0
-        assert np.sum(s[:, :, 5:]) == h*w, np.sum(s[:, :, :5])
+        assert np.sum(s[:, :, 5:]) == h * w, np.sum(s[:, :, :5])
         marker_weight = np.reshape(np.array(range(11)), (1, 1, 11))
-        return s, y, x, np.sum(s[:, :, 4]), np.sum(marker_weight*s[:, :, 5:])
+        return s, y, x, np.sum(s[:, :, 4]), np.sum(marker_weight * s[:, :, 5:])
 
 
-def generator(config):
-    dir_name = config.dir_name
+class _DataThread(threading.Thread):
+
+    def __init__(self, data_queue: mp.Queue, dir_name: str, total: int):
+        super().__init__()
+        self.total = total
+        self.seen_programs: Set[str] = set()
+        self.data_queue = data_queue
+
+        # output files
+        self.f = h5py.File(os.path.join(dir_name, 'data.hdf5'), 'w')
+        self.id_file = open(os.path.join(dir_name, 'id.txt'), 'w')
+
+    def run(self) -> None:
+        max_demo_length_in_dataset = -1
+        max_program_length_in_dataset = -1
+
+        # progress bar
+        bar = tqdm.tqdm(total=self.total)
+
+        while True:
+            data = self.data_queue.get()
+            if data is None:
+                break  # terminate if no more data
+
+            _id: str
+            grp_data: Dict[str, Any]
+            _id, grp_data = data
+
+            if 'program' not in grp_data:
+                grp = self.f.create_group(_id)
+                grp.update(grp_data)
+                continue
+
+            prog = str(grp_data['program'])
+            if prog in self.seen_programs or len(self.seen_programs) >= self.total:
+                continue
+
+            max_demo_length_in_dataset = max(max_demo_length_in_dataset, np.max(grp_data['s_h_len']))
+            max_program_length_in_dataset = max(max_program_length_in_dataset, grp_data['program'].shape[0])
+            _id = f'no_{len(self.seen_programs)}' + _id
+            self.seen_programs.add(prog)
+
+            bar.update()
+
+            self.id_file.write(_id + '\n')
+            grp = self.f.create_group(_id)
+            grp.update(grp_data)
+
+        grp = self.f['data_info']
+        grp.update({'max_demo_length': max_demo_length_in_dataset,
+                    'max_program_length': max_program_length_in_dataset})
+
+        print('Data processor finished')
+        self.f.close()
+        self.id_file.close()
+        bar.close()
+
+
+def _gen_proc(data_queue: mp.Queue, seed: int, num_total: int, config: argparse.Namespace):
     h = config.height
     w = config.width
     c = len(karel.state_table)
     wall_prob = config.wall_prob
-    num_train = config.num_train
-    num_test = config.num_test
-    num_val = config.num_val
-    num_total = num_train + num_test + num_val
 
-    # output files
-    f = h5py.File(os.path.join(dir_name, 'data.hdf5'), 'w')
-    id_file = open(os.path.join(dir_name, 'id.txt'), 'w')
-
-    # progress bar
-    bar = progressbar.ProgressBar(maxval=100,
-                                  widgets=[progressbar.Bar('=', '[', ']'), ' ',
-                                           progressbar.Percentage()])
-    bar.start()
-
-    dsl = get_KarelDSL(dsl_type='prob', seed=config.seed)
-    s_gen = KarelStateGenerator(seed=config.seed)
+    dsl = get_KarelDSL(dsl_type='prob', seed=seed)
+    s_gen = KarelStateGenerator(seed)
     karel_world = karel.Karel_world()
 
-    count = 0
-    max_demo_length_in_dataset = -1
-    max_program_length_in_dataset = -1
     seen_programs = set()
-    while(1):
+
+    for _ in range(num_total):
         # generate a single program
         random_code = dsl.random_code(max_depth=config.max_program_stmt_depth,
                                       max_nesting_depth=config.max_program_nesting_depth)
         # skip seen programs
         if random_code in seen_programs:
             continue
+        seen_programs.add(random_code)  # TODO moved this here
         program_seq = np.array(dsl.code2intseq(random_code), dtype=np.int8)
         if program_seq.shape[0] > config.max_program_length:
             continue
@@ -97,8 +146,7 @@ def generator(config):
             except RuntimeError:
                 pass
             else:
-                if len(karel_world.s_h) <= config.max_demo_length and \
-                        len(karel_world.s_h) >= config.min_demo_length:
+                if config.max_demo_length >= len(karel_world.s_h) >= config.min_demo_length:
                     s_h_list.append(np.stack(karel_world.s_h, axis=0))
                     a_h_list.append(np.array(karel_world.a_h))
                     num_demo += 1
@@ -122,43 +170,50 @@ def generator(config):
         for i, a_h in enumerate(a_h_list):
             demos_a_h[i, :a_h.shape[0]] = a_h
 
-        max_demo_length_in_dataset = max(max_demo_length_in_dataset, np.max(len_s_h))
-        max_program_length_in_dataset = max(max_program_length_in_dataset, program_seq.shape[0])
-
         # save the state
-        id = 'no_{}_prog_len_{}_max_s_h_len_{}'.format(
-            count, program_seq.shape[0], np.max(len_s_h))
-        id_file.write(id+'\n')
-        grp = f.create_group(id)
-        grp['program'] = program_seq
-        grp['s_h_len'] = len_s_h
-        grp['a_h_len'] = len_a_h
-        grp['s_h'] = demos_s_h
-        grp['a_h'] = demos_a_h
-        seen_programs.add(random_code)
-        # progress bar
-        count += 1
-        if count % (num_total / 100) == 0:
-            bar.update(count / (num_total / 100))
-        if count >= num_total:
-            grp = f.create_group('data_info')
-            grp['max_demo_length'] = max_demo_length_in_dataset
-            grp['dsl_type'] = 'prob'
-            grp['max_program_length'] = max_program_length_in_dataset
-            grp['num_program_tokens'] = len(dsl.int2token)
-            grp['num_demo_per_program'] = config.num_demo_per_program
-            grp['num_action_tokens'] = len(dsl.action_functions)
-            grp['num_train'] = config.num_train
-            grp['num_test'] = config.num_test
-            grp['num_val'] = config.num_val
-            bar.finish()
-            f.close()
-            id_file.close()
-            log.info('Dataset generated under {} with {}'
-                     ' samples ({} for training and {} for testing '
-                     'and {} for val'.format(dir_name, num_total,
-                                             num_train, num_test, num_val))
-            return
+        _id = f'prog_len_{program_seq.shape[0]}_max_s_h_len_{np.max(len_s_h)}'
+        grp = {'program': program_seq,
+               's_h_len': len_s_h,
+               'a_h_len': len_a_h,
+               's_h': demos_s_h,
+               'a_h': demos_a_h}
+        data_queue.put((_id, grp))
+
+
+def generator(config):
+    dir_name = config.dir_name
+    num_train = config.num_train
+    num_test = config.num_test
+    num_val = config.num_val
+    num_total = num_train + num_test + num_val
+
+    # create and start data processor
+    data_queue = mp.Manager().Queue()
+    data_processor = _DataThread(data_queue, config.dir_name, num_total)
+    data_processor.start()
+
+    while len(data_processor.seen_programs) < num_total:
+        # print(f'Num unique progs: {len(data_processor.seen_programs)}')
+        # print(f'Starting new batch of {PARALLEL} parallel generators, each aiming for {BATCH_SIZE} programs...')
+        args = [(data_queue, config.seed + i, BATCH_SIZE, config) for i in range(PARALLEL)]
+        run_parallel(_gen_proc, args, processes=PARALLEL, use_tqdm=False)
+        config.seed += PARALLEL
+
+    dsl = get_KarelDSL(dsl_type='prob', seed=config.seed)
+    grp = {'dsl_type': 'prob',
+           'num_program_tokens': len(dsl.int2token),
+           'num_action_tokens': len(dsl.action_functions),
+           'num_demo_per_program': config.num_demo_per_program,
+           'num_train': config.num_train,
+           'num_test': config.num_test,
+           'num_val': config.num_val}
+
+    data_queue.put(('data_info', grp))
+    data_queue.put(None)
+    data_processor.join()
+
+    log.info(f'Dataset generated under {dir_name} with {num_total} samples ({num_train} '
+             f'for training and {num_test} for testing and {num_val} for val')
 
 
 def check_path(path):
@@ -197,6 +252,7 @@ def main():
     check_path(args.dir_name)
 
     generator(args)
+
 
 if __name__ == '__main__':
     main()
