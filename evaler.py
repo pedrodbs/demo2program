@@ -206,8 +206,8 @@ class Evaler(object):
                                     '(error)' if greedy_is_correct_syntax[i] == 0 else '',
                                     greedy_program_str,
                                 ))
-                    loss_all.append(np.array(loss.values()))
-                    acc_all.append(np.array(acc.values()))
+                    loss_all.append(np.array(list(loss.values())))
+                    acc_all.append(np.array(list(acc.values())))
                     time_all.append(step_time)
                     for hist_key, hist_value in hist.items():
                         if hist_key not in hist_all:
@@ -220,8 +220,8 @@ class Evaler(object):
                 for hist_key, hist_values in hist_all.items():
                     hist_avg[hist_key] = np.average(np.stack(hist_values), axis=0)
                 final_msg = self.log_final_message(
-                    loss_avg, loss.keys(), acc_avg,
-                    acc.keys(), hist_avg, hist_avg.keys(), np.sum(time_all),
+                    loss_avg, list(loss.keys()), acc_avg,
+                    list(acc.keys()), hist_avg, list(hist_avg.keys()), np.sum(time_all),
                     write_summary=self.config.write_summary,
                     summary_file=self.config.summary_file
                 )
