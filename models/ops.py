@@ -1,7 +1,7 @@
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
 import tensorflow.contrib.slim as slim
-from util import log
+from karel_env.util import log
 
 
 def lrelu(x, leak=0.2, name="lrelu"):

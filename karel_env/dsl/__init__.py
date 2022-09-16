@@ -1,6 +1,6 @@
-from dsl_prob import KarelDSLProb
+from .dsl_prob import KarelDSLProb
 
-from dsl_prob_syntax import KarelDSLProbSyntax
+from .dsl_prob_syntax import KarelDSLProbSyntax
 
 
 def get_KarelDSL(dsl_type='prob', seed=None):

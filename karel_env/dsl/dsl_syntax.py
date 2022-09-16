@@ -1,5 +1,5 @@
-from third_party import yacc
-from dsl_base import KarelDSLBase
+from .third_party import yacc
+from .dsl_base import KarelDSLBase
 
 
 class KarelDSLSyntax(KarelDSLBase):
