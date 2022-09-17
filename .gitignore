@@ -164,3 +164,4 @@ train_dir
 eval_dir
 karel_env/dsl/_parsetab.py
 karel_env/dsl/parser.out
+/karel_env/dsl/parsetab.py

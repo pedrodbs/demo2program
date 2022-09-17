@@ -3,12 +3,14 @@ Domain specific language for Karel Environment
 
 Code is adapted from https://github.com/carpedm20/karel
 """
+import sys
 
 import numpy as np
 import ply.lex as lex
 from functools import wraps
 
-from .third_party import yacc
+# from .third_party import yacc
+from ply import yacc
 
 MIN_INT = 0
 MAX_INT = 19
@@ -17,11 +19,41 @@ INT_PREFIX = 'R='
 
 class KarelDSLBase(object):
 
+    def get_grammar(self):
+
+        # Get the module dictionary used for the parser
+        _items = [(k, getattr(self, k)) for k in dir(self)]
+        pinfo = yacc.ParserReflect(dict(_items))
+        pinfo.get_all()
+
+        if pinfo.error:
+            raise yacc.YaccError('Unable to build parser')
+
+        if pinfo.validate_all():
+            raise yacc.YaccError('Unable to build parser')
+
+        self.grammar = yacc.Grammar(pinfo.tokens)
+
+        # Add productions to the grammar
+        for funcname, gram in pinfo.grammar:
+            file, line, prodname, syms = gram
+            self.grammar.add_production(prodname, syms, funcname, file, line)
+
+        # Set the grammar start symbols
+        self.grammar.set_start(pinfo.start)
+
     def get_yacc(self):
-        self.yacc, self.grammar = yacc.yacc(
+
+        self.yacc = yacc.yacc(
+            method='LALR',
+            debug=True,
             module=self,
-            tabmodule="_parsetab",
-            with_grammar=True)
+            tabmodule="parsetab",
+            # with_grammar=True
+        )
+
+        self.get_grammar()
+
 
     def __init__(self, seed=None):
         self.lexer = lex.lex(module=self)
@@ -42,6 +74,7 @@ class KarelDSLBase(object):
                 r = f(*args, **kwargs)
                 self.call_counter[0] += 1
                 return r
+
             return wrapped
 
         self.callout = callout

@@ -1,13 +1,18 @@
-from .third_party import yacc
+from ply import yacc
 from .dsl_base import KarelDSLBase
 
 
 class KarelDSLSyntax(KarelDSLBase):
     def get_yacc(self):
-        self.yacc, self.grammar = yacc.yacc(
+        self.yacc = yacc.yacc(
+            method='LALR',
+            debug=True,
             module=self,
-            tabmodule="_parsetab_syntax",
-            with_grammar=True)
+            tabmodule='parsetab_syntax',
+            # with_grammar=True
+        )
+
+        self.get_grammar()
 
     def get_next_candidates(self, code, **kwargs):
         next_candidates = self.yacc.parse(code, **kwargs)
