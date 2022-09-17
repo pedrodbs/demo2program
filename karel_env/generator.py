@@ -19,7 +19,6 @@ from karel_env.util import log
 from utils.mp import run_parallel
 
 PARALLEL = os.cpu_count()
-BATCH_SIZE = 100
 
 
 class KarelStateGenerator(object):
@@ -193,11 +192,14 @@ def generator(config):
     data_processor.start()
 
     while len(data_processor.seen_programs) < num_total:
+        missing = num_total - len(data_processor.seen_programs)
+        num_gen = max(1, int(missing / PARALLEL))
+        parallel = min(PARALLEL, missing)
         # print(f'Num unique progs: {len(data_processor.seen_programs)}')
-        # print(f'Starting new batch of {PARALLEL} parallel generators, each aiming for {BATCH_SIZE} programs...')
-        args = [(data_queue, config.seed + i, BATCH_SIZE, config) for i in range(PARALLEL)]
-        run_parallel(_gen_proc, args, processes=PARALLEL, use_tqdm=False)
-        config.seed += PARALLEL
+        # print(f'Starting new batch of {parallel} parallel generators, each aiming for {num_gen} programs...')
+        args = [(data_queue, config.seed + i, num_gen, config) for i in range(parallel)]
+        run_parallel(_gen_proc, args, processes=parallel, use_tqdm=False)
+        config.seed += parallel
 
     dsl = get_KarelDSL(dsl_type='prob', seed=config.seed)
     grp = {'dsl_type': 'prob',
