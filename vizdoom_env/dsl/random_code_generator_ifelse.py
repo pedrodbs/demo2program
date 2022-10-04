@@ -1,6 +1,6 @@
 import numpy as np
 
-from dsl_parse import parse
+from .dsl_parse import parse
 
 stmt_length_range = {
         'span0': (1, 2),  # [1, 6]

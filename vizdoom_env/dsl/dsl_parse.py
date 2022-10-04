@@ -50,8 +50,8 @@ def check_and_apply(queue, rule):
     l = len(r)
     if len(queue) >= l:
         t = queue[-l:]
-        if list(zip(*t)[0]) == r:
-            new_t = rule[1](list(zip(*t)[1]))
+        if list(list(zip(*t))[0]) == r:
+            new_t = rule[1](list(list(zip(*t))[1]))
             del queue[-l:]
             queue.extend(new_t)
             return True
@@ -293,12 +293,14 @@ def parse(program):
     queue = []
     applied = False
     while len(p_tokens) > 0 or len(queue) != 1:
-        if applied: applied = False
+        if applied:
+            applied = False
         else:
             queue.append((p_tokens.pop(), None))
         for rule in rules:
             applied = check_and_apply(queue, rule)
-            if applied: break
+            if applied:
+                break
         if not applied and len(p_tokens) == 0:  # error parsing
             return None, False
     return queue[0][1], True
