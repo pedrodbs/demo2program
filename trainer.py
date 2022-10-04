@@ -12,6 +12,10 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from models.util import log
 
+CHECKPOINT_SAVE_STEPS = 1000
+MAX_TRAIN_STEPS = 1000000
+LOSS_THRESHOLD = 0.05
+
 
 class Trainer(object):
 
@@ -150,14 +154,11 @@ class Trainer(object):
         log.infov("Training Starts!")
         pprint(self.batch_train)
 
-        max_steps = 1000000
-
-        ckpt_save_step = 1000
         log_step = self.log_step
         test_sample_step = self.test_sample_step
         write_summary_step = self.write_summary_step
 
-        for s in xrange(max_steps):
+        for s in xrange(MAX_TRAIN_STEPS):
             # train a single step
             step, train_summary, loss, output, step_time = \
                 self.run_single_step(
@@ -177,11 +178,14 @@ class Trainer(object):
                 self.summary_writer.add_summary(train_summary,
                                                 global_step=step)
 
-            if s % ckpt_save_step == 0:
+            if s % CHECKPOINT_SAVE_STEPS == 0:
                 log.infov("Saved checkpoint at %d", s)
                 self.saver.save(
                     self.session, os.path.join(self.train_dir, 'model'),
                     global_step=step)
+
+            if loss < LOSS_THRESHOLD:
+                break
 
     def run_single_step(self, batch, step=None, is_train=True):
         _start_time = time.time()
@@ -279,7 +283,7 @@ def main():
                         help='set to True to train models with scheduled sampling')
     parser.add_argument('--scheduled_sampling_decay_steps', type=int, default=20000,
                         help='the number of training steps required to decay'
-                        'scheduled sampling probability to minimum.')
+                             'scheduled sampling probability to minimum.')
     # model hyperparameters
     parser.add_argument('--encoder_rnn_type', default='lstm',
                         choices=['lstm', 'rnn', 'gru'])
@@ -307,7 +311,7 @@ def main():
     # a_h: action history, sequence of actions
     # per: sequence of perception primitives
     program, _, s_h, test_s_h, a_h, _, _, _, program_len, demo_len, test_demo_len, \
-        per, test_per = data_tuple[:13]
+    per, test_per = data_tuple[:13]
 
     config.dim_program_token = np.asarray(program.shape)[0]
     config.max_program_len = np.asarray(program.shape)[1]
@@ -339,6 +343,7 @@ def main():
     log.warning("dataset: %s, learning_rate: %f",
                 config.dataset_path, config.learning_rate)
     trainer.train()
+
 
 if __name__ == '__main__':
     main()
