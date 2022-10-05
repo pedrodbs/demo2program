@@ -143,8 +143,18 @@ class TaxiEnv(object):
         color_idx = COLORS.index(loc)
         return self.env.locs[color_idx] == taxi_loc
 
+    @property
+    def num_percepts(self) -> int:
+        return len(COLORS) * 3 + 1
+
+    @property
+    def percepts(self) -> List[str]:
+        return [f'PassengerAt {c}' for c in PASS_COLORS] + \
+               [f'IsDestination {c}' for c in COLORS] + \
+               [f'TaxiIn {c}' for c in COLORS]
+
     def _get_percept_vector(self) -> np.ndarray:
-        out = np.full(len(COLORS) * 3 + 1, fill_value=False, dtype=bool)
+        out = np.full(self.num_percepts, fill_value=False, dtype=bool)
         idx = 0
         for c in PASS_COLORS:
             out[idx] = self.passenger_at(c)
