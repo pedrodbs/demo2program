@@ -23,6 +23,9 @@ setup(name='demo2program',
           'matplotlib'
       ],
       extras_require={
-
+          'taxi': [
+              'gym[classic]',
+              'dijkstra',
+          ],
       },
       p_safe=True)
