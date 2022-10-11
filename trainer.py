@@ -13,7 +13,7 @@ import tensorflow.contrib.slim as slim
 from models.util import log
 
 CHECKPOINT_SAVE_STEPS = 1000
-MAX_TRAIN_STEPS = 1000000
+MAX_TRAIN_STEPS = 10000  # 1000000
 LOSS_THRESHOLD = 0.05
 
 
@@ -66,6 +66,8 @@ class Trainer(object):
             from karel_env.input_ops_karel import create_input_ops
         elif config.dataset_type == 'vizdoom':
             from vizdoom_env.input_ops_vizdoom import create_input_ops
+        elif config.dataset_type == 'taxi':
+            from taxi_env.input_ops_taxi import create_input_ops
         else:
             raise ValueError(config.dataset)
 
@@ -257,7 +259,7 @@ def main():
                                  'summarizer', 'full'],
                         help='specify which type of models to train')
     parser.add_argument('--dataset_type', type=str, default='karel',
-                        choices=['karel', 'vizdoom'])
+                        choices=['karel', 'vizdoom', 'taxi'])
     parser.add_argument('--dataset_path', type=str,
                         default='datasets/karel_dataset',
                         help='the path to your dataset')
@@ -302,6 +304,10 @@ def main():
         import vizdoom_env.dataset_vizdoom as dataset
         dataset_train, dataset_test, dataset_val \
             = dataset.create_default_splits(config.dataset_path, num_k=config.num_k)
+    elif config.dataset_type == 'taxi':
+        import taxi_env.dataset_taxi as dataset
+        dataset_train, dataset_test, dataset_val \
+            = dataset.create_default_splits(config.dataset_path, num_k=config.num_k)
     else:
         raise ValueError(config.dataset)
 
@@ -337,6 +343,13 @@ def main():
         config.vizdoom_max_init_pos_len = dataset_train.vizdoom_max_init_pos_len
         config.perception_type = dataset_train.perception_type
         config.level = dataset_train.level
+    elif config.dataset_type == 'taxi':
+        config.dsl_type = 'taxi_default'  # taxi has 1 dsl type for now
+        config.env_type = 'taxi_default'  # taxi has 1 env type
+        config.vizdoom_pos_keys = []
+        config.vizdoom_max_init_pos_len = -1
+        config.perception_type = ''
+        config.level = None
 
     trainer = Trainer(config, dataset_train, dataset_test)
 
