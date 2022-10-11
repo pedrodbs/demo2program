@@ -69,10 +69,15 @@ class Model(object):
         if self.dataset_type == 'karel':
             from karel_env.dsl import get_KarelDSL
             self.vocab = get_KarelDSL(dsl_type=self.dsl_type, seed=123)
-        else:
+        elif self.dataset_type == 'vizdoom':
             from vizdoom_env.dsl.vocab import VizDoomDSLVocab
             self.vocab = VizDoomDSLVocab(perception_type=self.perception_type,
                                          level=self.level)
+        elif self.dataset_type == 'taxi':
+            from taxi_env.dsl import TaxiVocab
+            self.vocab = TaxiVocab()
+        else:
+            raise ValueError(self.dataset_type)
 
         # create placeholders for the input
         self.program_id = tf.placeholder(
@@ -607,6 +612,15 @@ class Model(object):
                 from karel_env.dsl.dsl_parse import parse
             elif self.dataset_type == 'vizdoom':
                 from vizdoom_env.dsl.dsl_parse import parse
+            elif self.dataset_type == 'taxi':
+                from taxi_env.dsl import parse as _parse
+                def parse(_p_str):
+                    _exe = _parse(_p_str)
+                    return _exe, _exe is not None
+
+            else:
+                raise ValueError(f'Unknown dataset_type: {self.dataset_type}')
+
             is_correct = []
             for i in range(self.batch_size):
                 if is_same_seq[i] == 1:
@@ -749,6 +763,23 @@ class Model(object):
                     exact_program_correct.append(0.0)
             return np.array(exact_program_correct, dtype=np.float32)
 
+        def exact_program_compare_taxi(p_token, p_len, is_correct_syntax,
+                                       gt_token, gt_len):
+            from taxi_env.dsl import parse
+
+            exact_program_correct = []
+            for i in range(self.batch_size):
+                if is_correct_syntax[i] == 1:
+                    p_str = self.vocab.intseq2str(p_token[i, :p_len[i, 0]])
+                    gt_str = self.vocab.intseq2str(gt_token[i, :gt_len[i, 0]])
+
+                    p_prog = parse(p_str)
+                    gt_prog = parse(gt_str)
+                    exact_program_correct.append(float(p_prog == gt_prog))
+                else:
+                    exact_program_correct.append(0.0)
+            return np.array(exact_program_correct, dtype=np.float32)
+
         def generate_program_output_karel(initial_states, max_demo_len,
                                           demo_k, h, w, depth,
                                           p_token, p_len, is_correct_syntax,
@@ -850,6 +881,55 @@ class Model(object):
             return np.stack(batch_pred_demos, axis=0).astype(np.float32), \
                    np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
 
+        def generate_program_output_taxi(initial_states, max_demo_len,
+                                         demo_k, h, w, depth,
+                                         p_token, p_len, is_correct_syntax,
+                                         is_same_seq):
+            from taxi_env.dsl import parse
+            from taxi_env.taxi_env import TaxiEnv
+
+            batch_pred_demos = []
+            batch_pred_demo_len = []
+            for i in range(self.batch_size):
+                pred_demos = []
+                pred_demo_len = []
+                for k in range(demo_k):
+                    if is_same_seq[i] == 0 and is_correct_syntax[i] == 1:
+                        p_str = self.vocab.intseq2str(p_token[i, :p_len[i, 0]])
+                        exe = parse(p_str)
+                        if exe is None:
+                            raise RuntimeError('s_exe couldn\'t be False here')
+                        taxi_env = TaxiEnv(17, max_steps=max_demo_len - 1)  # -1 to include initial state
+                        init_state = initial_states[i, k]
+                        taxi_env.init_game(init_state)
+                        s_run = True
+                        done = False
+                        while not done:
+                            action = exe(taxi_env, 0)
+                            if action is None:
+                                s_run = False
+                                break
+                            done = taxi_env.state_transition(action)
+                        if s_run:
+                            exe_s_h = copy.deepcopy(taxi_env.s_h)
+                            pred_demo_len.append(len(exe_s_h))
+                            pred_demo = np.stack(exe_s_h[:pred_demo_len[-1]], axis=0)
+                            padded = np.zeros([max_demo_len, h, w, depth])
+                            padded[:pred_demo.shape[0], :, :, :] = pred_demo[:max_demo_len]
+                            pred_demos.append(padded)
+                        else:
+                            pred_demo_len.append(0)
+                            pred_demos.append(
+                                np.zeros([max_demo_len, h, w, depth]))
+                    else:
+                        pred_demo_len.append(0)
+                        pred_demos.append(
+                            np.zeros([max_demo_len, h, w, depth]))
+                batch_pred_demos.append(np.stack(pred_demos, axis=0))
+                batch_pred_demo_len.append(np.stack(pred_demo_len, axis=0))
+            return np.stack(batch_pred_demos, axis=0).astype(np.float32), \
+                   np.stack(batch_pred_demo_len, axis=0).astype(np.int32)
+
         def ExecuteProgram(s_h, max_demo_len, k, h, w, depth,
                            p_token, p_len,
                            is_correct_syntax, is_same_seq,
@@ -870,6 +950,14 @@ class Model(object):
                      max_demo_len, k, h, w, depth,
                      p_token, p_len, is_correct_syntax, is_same_seq],
                     (tf.float32, tf.int32))
+            elif self.dataset_type == 'taxi':
+                initial_states = s_h[:, :, 0, :, :, :]  # [bs, k, h, w, depth]
+                execution, execution_len = tf.py_func(
+                    generate_program_output_taxi,
+                    [initial_states,
+                     max_demo_len, k, h, w, depth,
+                     p_token, p_len, is_correct_syntax, is_same_seq],
+                    (tf.float32, tf.int32))
             else:
                 raise ValueError('Unknown dataset_type')
             execution.set_shape([self.batch_size, k,
@@ -886,6 +974,11 @@ class Model(object):
             elif self.dataset_type == 'vizdoom':
                 exact_program_correct = tf.py_func(
                     exact_program_compare_vizdoom,
+                    [p_token, p_len, is_correct_syntax, gt_token, gt_len],
+                    (tf.float32))
+            elif self.dataset_type == 'taxi':
+                exact_program_correct = tf.py_func(
+                    exact_program_compare_taxi,
                     [p_token, p_len, is_correct_syntax, gt_token, gt_len],
                     (tf.float32))
             else:
