@@ -1,10 +1,15 @@
 # Generate taxi env datasets
+
+NUM_TRAIN=100000 #25000
+NUM_TEST=10000   #5000
+NUM_VAL=10000    #5000
+
 python -m taxi_env.generator \
   --dir_name='taxi_dataset' \
-  --seed=123 \
-  --num_train=25000 \
-  --num_test=5000 \
-  --num_val=5000 \
+  --seed=17 \
+  --num_train=$NUM_TRAIN \
+  --num_test=$NUM_TEST \
+  --num_val=$NUM_VAL \
   --max_program_length=50 \
   --max_program_depth=6 \
   --min_max_demo_length_for_program=2 \
