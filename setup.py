@@ -24,7 +24,7 @@ setup(name='demo2program',
       ],
       extras_require={
           'taxi': [
-              'gym[classic]',
+              'gym[classic_control]',
               'dijkstra',
           ],
       },
