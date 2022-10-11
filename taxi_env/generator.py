@@ -116,8 +116,8 @@ def _gen_proc(data_queue: mp.Queue, seed: int, num_total: int, config: argparse.
                 pass
             else:
                 if config.max_demo_length >= len(taxi_env.s_h) >= config.min_demo_length:
-                    s_h_list.append(np.stack(taxi_env.s_h, axis=0))  # shape: (trace_len, w, h)
-                    a_h_list.append(np.array(taxi_env.a_h))  # shape: (trace_len, )
+                    s_h_list.append(np.stack(taxi_env.s_h, axis=0))  # shape: (trace_len, w, h, c)
+                    a_h_list.append(np.array(taxi_env.a_h, dtype=np.uint8))  # shape: (trace_len, )
                     p_v_h_list.append(np.stack(taxi_env.p_v_h, axis=0))  # shape: (trace_len, n_percept)
                     num_demo += 1
 
@@ -130,27 +130,28 @@ def _gen_proc(data_queue: mp.Queue, seed: int, num_total: int, config: argparse.
         if np.max(len_s_h) < config.min_max_demo_length_for_program:
             continue
 
-        # state shape: (n_demos, trace_len, w, h)
-        h = s_h_list[0].shape[-1]
-        w = s_h_list[0].shape[-2]
-        demos_s_h = np.zeros([num_demo, np.max(len_s_h), w, h], dtype=np.uint8)
+        # state shape: (n_demos, trace_len, w, h, c)
+        w = s_h_list[0].shape[-3]
+        h = s_h_list[0].shape[-2]
+        c = s_h_list[0].shape[-1]
+        demos_s_h = np.zeros((num_demo, np.max(len_s_h), w, h, c), dtype=s_h_list[0].dtype)
         for i, s_h in enumerate(s_h_list):
             demos_s_h[i, :s_h.shape[0]] = s_h
 
         len_a_h = np.array([a_h.shape[0] for a_h in a_h_list])
 
         # action shape: (n_demos, trace_len)
-        demos_a_h = np.zeros([num_demo, np.max(len_a_h)], dtype=np.uint8)
+        demos_a_h = np.zeros([num_demo, np.max(len_a_h)], dtype=a_h_list[0].dtype)
         for i, a_h in enumerate(a_h_list):
             demos_a_h[i, :a_h.shape[0]] = a_h
 
         # percepts shape: (n_demos, trace_len, n_percept)
-        demos_p_v_h = np.zeros([num_demo, np.max(len_s_h), taxi_env.num_percepts], dtype=bool)
+        demos_p_v_h = np.zeros([num_demo, np.max(len_s_h), taxi_env.num_percepts], dtype=p_v_h_list[0].dtype)
         for i, p_v_h in enumerate(p_v_h_list):
             demos_p_v_h[i, :p_v_h.shape[0]] = p_v_h
 
         # save the state
-        _id = f'prog_len_{str(program_seq)}_max_s_h_len_{np.max(len_s_h)}'
+        _id = f'prog_{"_".join([str(e) for e in program_seq])}_max_s_h_len_{np.max(len_s_h)}'
         grp = {'program': program_seq,
                's_h_len': len_s_h[:config.num_demo_per_program],
                's_h': demos_s_h[:config.num_demo_per_program],

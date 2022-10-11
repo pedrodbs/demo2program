@@ -32,10 +32,6 @@ def str2int_seq(string: str) -> List[int]:
     return [TOKEN2INT[t] for t in string.split()]
 
 
-def int_seq2str(int_seq: Sequence[int]) -> str:
-    return ' '.join([INT2TOKEN[i] for i in int_seq])
-
-
 def token_dim() -> int:
     return len(INT2TOKEN)
 
@@ -337,3 +333,14 @@ class TaxiProgramGenerator(object):
                 codes.append(t)
 
         return codes
+
+
+class TaxiVocab(object):
+    def __init__(self):
+        self.token2int = dict(TOKEN2INT)
+        self.token2int['m)'] = TOKEN2INT[')']  # for compatibility
+
+    def intseq2str(self, int_seq: Sequence[int]) -> str:
+        return ' '.join([INT2TOKEN[i] for i in int_seq])
+
+
