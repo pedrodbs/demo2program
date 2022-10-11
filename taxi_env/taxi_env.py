@@ -1,11 +1,13 @@
 import gym
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dijkstra import Graph, DijkstraSPF
 from gym.envs.toy_text.taxi import TaxiEnv as TaxiGym
 from gym.wrappers import TimeLimit
 
 # see description at: https://github.com/openai/gym/blob/master/gym/envs/toy_text/taxi.py
+RENDER_MODE = 'ansi'  # 'rgb_array'
+
 CLR_RED_SYMB = 'Red'
 CLR_GREEN_SYMB = 'Green'
 CLR_YELLOW_SYMB = 'Yellow'
@@ -28,10 +30,11 @@ MAP_DEST = [f'{c}_D' for c in MAP_COLORS]
 MAP_DEST_TAXI = [f'{c}_D_T' for c in MAP_COLORS]
 MAP_DEST_TAXI_PASS = [f'{c}_D_T_P' for c in MAP_COLORS]
 MAP_DEST_PASS_TAXI = [f'{c}_D_P_T' for c in MAP_COLORS]
-MAP_TAXI = [f'{c}_T' for c in MAP_COLORS] + [f'{c}_T' for c in MAP_PASS]
-MAP_GRID = ['+', '-', ':', '|', ' ', ' _T', ' _T_P']
-INT2MAP: List[str] = MAP_GRID + MAP_COLORS + MAP_PASS + MAP_TAXI + MAP_PASS_TAXI + \
-                     MAP_DEST + MAP_DEST_TAXI + MAP_DEST_TAXI_PASS + MAP_DEST_PASS_TAXI
+MAP_COLORS_TAXI = [f'{c}_T' for c in MAP_COLORS] + [f'{c}_T' for c in MAP_PASS]
+MAP_TAXI = [' _T', ' _T_P']
+# MAP_GRID = ['+', '-', ':', '|', ' ']
+INT2MAP: List[str] = [' '] + MAP_COLORS + MAP_PASS + MAP_COLORS_TAXI + MAP_PASS_TAXI + \
+                     MAP_DEST + MAP_DEST_TAXI + MAP_DEST_TAXI_PASS + MAP_DEST_PASS_TAXI + MAP_TAXI
 MAP2INT: Dict[str, int] = {v: i for i, v in enumerate(INT2MAP)}
 
 
@@ -45,7 +48,7 @@ class TaxiEnv(object):
         self.p_v_h: List[np.ndarray] = []
         self.s: int = -1
 
-        self.env: TaxiGym = TimeLimit(gym.make('Taxi-v3', render_mode='ansi'), max_episode_steps=max_steps)
+        self.env: TaxiGym = TimeLimit(gym.make('Taxi-v3', render_mode=RENDER_MODE), max_episode_steps=max_steps)
 
         # get shortest paths to color locations and compute move action from every other location
         g = self._get_map_graph()
@@ -82,10 +85,17 @@ class TaxiEnv(object):
                 assert act != -1
                 self.paths[loc][other_loc] = act
 
-    def init_game(self):
-        # reset env
-        self.s, *_ = self.env.reset(seed=self.seed)
-        self.seed = None
+    def init_game(self, s: Optional[int] = None):
+        if s is None:
+            # reset env
+            self.s, *_ = self.env.reset(seed=self.seed)
+            self.seed = None
+        else:
+            self.s = self.env.s = s
+            self.env.lastaction = None
+            self.env.taxi_orientation = 0
+            if self.env.render_mode == 'human':
+                self.env.render()
 
         # initialize histories
         self.s_h = [self._get_state_array()]
@@ -108,6 +118,10 @@ class TaxiEnv(object):
         return g
 
     def _get_state_array(self) -> np.array:
+        if RENDER_MODE in {'human', 'rgb_array'}:
+            return self.env.render()
+
+        # get symbol-based representation
         # based on gym.envs.toy_text.taxi.TaxiEnv._render_text
         desc = self.env.desc.copy().tolist()
         out = [[c.decode('utf-8') for c in line] for line in desc]
@@ -126,8 +140,13 @@ class TaxiEnv(object):
             # passenger in taxi
             out[1 + taxi_row][2 * taxi_col + 1] += '_T_P'
 
-        # convert to indexes and return array
-        return np.array([[MAP2INT[c] for c in row] for row in out], dtype=np.uint8)
+        # convert to indexes, get one-hot encoding and return array
+        out = np.array(out)
+        out = out[1:-1, np.arange(1, out.shape[1], 2)]  # remove walls since they're static across environments
+        out = np.array([[MAP2INT[c] for c in row] for row in out], dtype=np.uint8)
+        res = np.eye(len(INT2MAP), dtype=bool)[out.reshape(-1)]
+        res = res.reshape(list(out.shape) + [len(INT2MAP)])
+        return res
 
     def passenger_at(self, loc: str):
         taxi_row, taxi_col, pass_idx, dest_idx = self.env.decode(self.s)
