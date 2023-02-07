@@ -85,20 +85,25 @@ class TaxiEnv(object):
                 assert act != -1
                 self.paths[loc][other_loc] = act
 
-    def init_game(self, s: Optional[int] = None):
-        if s is None:
-            # reset env
-            self.s, *_ = self.env.reset(seed=self.seed)
-            self.seed = None
-        else:
+    def init_game(self, s: Optional[int] = None, s_array: Optional[np.array] = None):
+        if s is not None:
             self.s = self.env.s = s
+            self.env.reset()
             self.env.lastaction = None
             self.env.taxi_orientation = 0
             if self.env.render_mode == 'human':
                 self.env.render()
+        elif s_array is not None:
+            s = self._state_from_array(s_array)
+            self.init_game(s=s)
+            return
+        else:
+            # reset env
+            self.s, *_ = self.env.reset(seed=self.seed)
+            self.seed = None
 
         # initialize histories
-        self.s_h = [self._get_state_array()]
+        self.s_h = [self._array_from_state()]
         self.a_h = []
         self.p_v_h = [self._get_percept_vector()]  # perception vector
 
@@ -117,7 +122,7 @@ class TaxiEnv(object):
                     g.add_edge((r, c + 1), (r, c), 1)
         return g
 
-    def _get_state_array(self) -> np.array:
+    def _array_from_state(self) -> np.array:
         if RENDER_MODE in {'human', 'rgb_array'}:
             return self.env.render()
 
@@ -147,6 +152,39 @@ class TaxiEnv(object):
         res = np.eye(len(INT2MAP), dtype=bool)[out.reshape(-1)]
         res = res.reshape(list(out.shape) + [len(INT2MAP)])
         return res
+
+    def _state_from_array(self, s_array: np.ndarray) -> int:
+        taxi_symbs = [i for symb, i in MAP2INT.items() if '_T' in symb]
+        taxi_locs = np.array(np.where(s_array[..., taxi_symbs])).flatten()
+
+        assert taxi_locs.size == 3  # only one location possible for taxi
+        taxi_row, taxi_col, _ = taxi_locs
+        pass_symbs = [i for symb, i in MAP2INT.items() if '_P' in symb]
+        pass_locs = np.array(np.where(s_array[..., pass_symbs])).flatten()
+        assert pass_locs.size == 3  # only one location possible for passenger
+        pass_row, pass_col, pass_symb_idx = pass_locs
+        if '_T_P' in INT2MAP[pass_symbs[pass_symb_idx]]:
+            pass_loc = PASS_COLORS.index(TAXI_SYMB)
+        else:
+            pass_loc = -1
+            for i, loc in enumerate(self.env.locs):
+                if pass_row == loc[0] and pass_col == loc[1]:
+                    pass_loc = i
+                    break
+            assert pass_loc != -1
+
+        dest_symbs = [i for symb, i in MAP2INT.items() if '_D' in symb]
+        dest_locs = np.array(np.where(s_array[..., dest_symbs])).flatten()
+        assert dest_locs.size == 3  # only one location possible for destination
+        dest_row, dest_col, _ = dest_locs
+        dest_idx = -1
+        for i, loc in enumerate(self.env.locs):
+            if dest_row == loc[0] and dest_col == loc[1]:
+                dest_idx = i
+                break
+        assert dest_idx != -1
+        s = self.env.encode(taxi_row, taxi_col, pass_loc, dest_idx)
+        return s
 
     def passenger_at(self, loc: str):
         taxi_row, taxi_col, pass_idx, dest_idx = self.env.decode(self.s)
@@ -206,7 +244,7 @@ class TaxiEnv(object):
         self.s, reward, done, trunc, info = self.env.step(act)
 
         # update histories
-        self.s_h.append(self._get_state_array())
+        self.s_h.append(self._array_from_state())
         self.a_h.append(ACT2INT[action])
         self.p_v_h.append(self._get_percept_vector())
 
