@@ -11,6 +11,7 @@ from pprint import pprint
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from models.util import log
+from utils.cmd_line import save_args
 
 CHECKPOINT_SAVE_STEPS = 1000
 MAX_TRAIN_STEPS = 10000  # 1000000
@@ -58,6 +59,8 @@ class Trainer(object):
 
         if not os.path.exists(self.train_dir): os.makedirs(self.train_dir)
         log.infov("Train Dir: %s", self.train_dir)
+
+        save_args(config, os.path.join(self.train_dir, 'config.json'))
 
         # --- input ops ---
         self.batch_size = config.batch_size

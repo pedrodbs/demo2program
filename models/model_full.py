@@ -901,7 +901,7 @@ class Model(object):
                             raise RuntimeError('s_exe couldn\'t be False here')
                         taxi_env = TaxiEnv(17, max_steps=max_demo_len - 1)  # -1 to include initial state
                         init_state = initial_states[i, k]
-                        taxi_env.init_game(init_state)
+                        taxi_env.init_game(s_array=init_state)
                         s_run = True
                         done = False
                         while not done:
