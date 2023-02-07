@@ -46,6 +46,8 @@ class Evaler(object):
             from karel_env.input_ops_karel import create_input_ops
         elif config.dataset_type == 'vizdoom':
             from vizdoom_env.input_ops_vizdoom import create_input_ops
+        elif config.dataset_type == 'taxi':
+            from taxi_env.input_ops_taxi import create_input_ops
         else:
             raise NotImplementedError("The dataset related code is not implemented.")
 
@@ -116,11 +118,16 @@ class Evaler(object):
                 if self.config.dataset_type == 'karel':
                     from karel_env.dsl import get_KarelDSL
                     dsl = get_KarelDSL(dsl_type=self.dataset.dsl_type, seed=123)
-                else:
+                elif self.config.dataset_type == 'vizdoom':
                     from vizdoom_env.dsl.vocab import VizDoomDSLVocab
                     dsl = VizDoomDSLVocab(
                         perception_type=self.dataset.perception_type,
                         level=self.dataset.level)
+                elif self.config.dataset_type == 'taxi':
+                    from taxi_env.dsl import TaxiVocab
+                    dsl = TaxiVocab()
+                else:
+                    raise ValueError(self.config.dataset_type)
 
                 hdf5_file = h5py.File('{}.hdf5'.format(base_name), 'w')
                 log_file = open('{}.log'.format(base_name), 'w')
@@ -139,12 +146,12 @@ class Evaler(object):
                 time_all = []
                 for s in xrange(self.config.max_steps):
                     step, loss, acc, hist, \
-                        pred_program, pred_program_len, pred_is_correct_syntax, \
-                        greedy_pred_program, greedy_program_len, greedy_is_correct_syntax, \
-                        gt_program, gt_program_len, output, program_id, \
-                        program_num_execution_correct, program_is_correct_execution, \
-                        greedy_num_execution_correct, greedy_is_correct_execution, \
-                        step_time = self.run_single_step(self.batch)
+                    pred_program, pred_program_len, pred_is_correct_syntax, \
+                    greedy_pred_program, greedy_program_len, greedy_is_correct_syntax, \
+                    gt_program, gt_program_len, output, program_id, \
+                    program_num_execution_correct, program_is_correct_execution, \
+                    greedy_num_execution_correct, greedy_is_correct_execution, \
+                    step_time = self.run_single_step(self.batch)
                     if not self.config.quiet:
                         step_msg = self.log_step_message(s, loss, acc,
                                                          hist, step_time)
@@ -171,11 +178,12 @@ class Evaler(object):
                             pred_program_str = dsl.intseq2str(pred_program_token)
                             greedy_program_token = np.argmax(
                                 greedy_pred_program[i, :,
-                                                    :greedy_program_len[i, 0]],
+                                :greedy_program_len[i, 0]],
                                 axis=0)
                             greedy_program_str = dsl.intseq2str(
                                 greedy_program_token)
-                            try: grp = hdf5_file.create_group(program_id[i])
+                            try:
+                                grp = hdf5_file.create_group(program_id[i])
                             except:
                                 pass
                             else:
@@ -282,12 +290,12 @@ class Evaler(object):
         _end_time = time.time()
 
         return step, loss, acc, hist, \
-            pred_program, pred_program_len, pred_is_correct_syntax, \
-            greedy_pred_program, greedy_program_len, greedy_is_correct_syntax, \
-            gt_program, gt_program_len, output, batch_chunk['id'], \
-            program_num_execution_correct, program_is_correct_execution, \
-            greedy_num_execution_correct, greedy_is_correct_execution, \
-            (_end_time - _start_time)
+               pred_program, pred_program_len, pred_is_correct_syntax, \
+               greedy_pred_program, greedy_program_len, greedy_is_correct_syntax, \
+               gt_program, gt_program_len, output, batch_chunk['id'], \
+               program_num_execution_correct, program_is_correct_execution, \
+               greedy_num_execution_correct, greedy_is_correct_execution, \
+               (_end_time - _start_time)
 
     def log_step_message(self, step, loss, acc, hist, step_time, is_train=False):
         if step_time == 0: step_time = 0.001
@@ -368,7 +376,7 @@ def main():
                                  'summarizer', 'full'],
                         help='specify which type of models to evaluate')
     parser.add_argument('--dataset_type', type=str, default='karel',
-                        choices=['karel', 'vizdoom'])
+                        choices=['karel', 'vizdoom', 'taxi'])
     parser.add_argument('--dataset_path', type=str,
                         default='datasets/karel_dataset',
                         help='the path to your dataset')
@@ -430,6 +438,8 @@ def main():
         import karel_env.dataset_karel as dataset
     elif config.dataset_type == 'vizdoom':
         import vizdoom_env.dataset_vizdoom as dataset
+    elif config.dataset_type == 'taxi':
+        import taxi_env.dataset_taxi as dataset
     else:
         raise ValueError(config.dataset)
 
@@ -446,12 +456,14 @@ def main():
         raise ValueError('Unknown dataset split')
 
     if not config.max_steps > 0:
-        config.max_steps = int(len(target_dataset._ids)/config.batch_size)
+        config.max_steps = int(len(target_dataset._ids) / config.batch_size)
 
     if config.dataset_type == 'karel':
         config.perception_type = ''
     elif config.dataset_type == 'vizdoom':
         config.perception_type = target_dataset.perception_type
+    elif config.dataset_type == 'taxi':
+        config.perception_type = ''
     else:
         raise ValueError(config.dataset)
     # }}}
@@ -461,7 +473,7 @@ def main():
     # [k, max_len_demo, ac], [1], [k]
     data_tuple = target_dataset.get_data(target_dataset.ids[0])
     program, _, s_h, test_s_h, a_h, _, _, _, program_len, demo_len, test_demo_len, \
-        per, test_per = data_tuple[:13]
+    per, test_per = data_tuple[:13]
 
     config.dim_program_token = np.asarray(program.shape)[0]
     config.max_program_len = np.asarray(program.shape)[1]
@@ -485,11 +497,18 @@ def main():
         config.vizdoom_pos_keys = target_dataset.vizdoom_pos_keys
         config.vizdoom_max_init_pos_len = target_dataset.vizdoom_max_init_pos_len
         config.level = target_dataset.level
+    elif config.dataset_type == 'taxi':
+        config.dsl_type = 'taxi_default'  # taxi has 1 dsl type for now
+        config.env_type = 'taxi_default'  # taxi has 1 env type
+        config.vizdoom_pos_keys = []
+        config.vizdoom_max_init_pos_len = -1
+        config.level = None
 
     evaler = Evaler(config, target_dataset)
 
     log.warning("dataset: %s", config.dataset_path)
     evaler.eval_run()
+
 
 if __name__ == '__main__':
     main()
